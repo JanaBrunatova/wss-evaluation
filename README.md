@@ -3,7 +3,7 @@
 This repository contain codes and necessary files to reproduce data published in the paper
 **_On the numerical evaluation of wall shear stress using the finite element method_**
 
-# Prerequisities
+## Prerequisities
 
 The code is written in Python3 and requires the following:
 
@@ -16,7 +16,7 @@ The code is written in Python3 and requires the following:
    python3 -m pip install -e .
     ```
 
-# 2D Stokes example
+## 2D Stokes example
 
 Results for the 2D Stokes flow on a unit square can be reproduced by running the following commands in the folder `2D_Stokes`:
 - For the P1/P1 stabilized element:
@@ -29,7 +29,7 @@ python3 python3 stokes_example.py -N 8 16 32 64 128 256 512 -o res_stokes_th/ --
 ```
 
 
-# 3D Poiseuille flow
+## 3D Poiseuille flow
 
 To run the 3D Poiseuille flow example, go to the folder `3D_Poiseuille` and use the following command:
 
@@ -39,28 +39,28 @@ python3 poiseuille_flow.py -model Newtonian -rho 1000 -mu 0.004 -theta 1.0 -unit
 
 **Parameters to set:**
 
-- `meshname`: Name of the mesh file.
+- `meshname`: Name of the `.xml` mesh file.
 - `meshfolder`: Folder containing the mesh file.
 - `element`: Element type (either `p1p1` or `th`).
 - `destination`: Name of the folder where the results will be stored.
 
-# 3D Patient-specific simulations
+## 3D Patient-specific simulations
 
-To run the 3D patient-specific simulations, use the following command with similar parameters as described above and one additional:
-- `case`: either `case01` or `case02`
+To run the 3D patient-specific simulations, go to the folder `3D_patient_specific` and use the following command with similar parameters as described above and one additional argument (`case`: either `case01` or `case02`; and note that the `meshname` must correspond to one of these cases!):
 
+- For the P2/P1 element, run:
 ```bash
 python3 aneurysm_example.py -model Newtonian -mu 0.004 -rho 1000 -theta -1.0 -unit_system SI -meshname ${meshname} -meshfolder ${meshfolder} -element th -normal FacetNormal -stab none -basic_monitor -refsys_filename meshes/${case}_refsystems_SI.dat -profile stac -profile_analytical True -v-avg 0.5 -bcout_dir_do_nothing False -unit_system SI -xdmf_last True -dest ${destination}
 ```
 
-- For the P1/P1 stabilized element:
+- For the P1/P1 stabilized element, run:
 ```bash
 python aneurysm_example.py -model Newtonian -mu 0.004 -rho 1000 -theta 1.0 -theta_in 1.0 -beta 100 -unit_system SI -meshname ${meshname} -meshfolder ${meshfolder} -element p1p1 -normal FacetNormal -stab ip -basic_monitor -refsys_filename meshes/${case}_refsystems_SI.dat -profile stac -profile_analytical True -v-avg 0.5 -bcout_dir_do_nothing False -unit_system SI -xdmf_last True -dest ${destination}
 ```
 
 It will store a HDF5File `w.h5`, where both the velocity and pressure fields are stored. Moreover, since we used the option `-xdmf_last True`, the velocity and pressure will also be stored in an XDMF file format.
 
-Subsequently, go to the folder `3D_patient_specific` and run the following postprocessing to obtain WSS from the velocity and pressure field:
+Finally, run the following postprocessing to obtain WSS from the velocity and pressure field:
 
 - For the P2/P1 element:
 ```bash
