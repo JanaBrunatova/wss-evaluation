@@ -1,6 +1,5 @@
 import os
 import pprint
-import shutil
 import sys
 
 import mpi4py
@@ -21,10 +20,8 @@ from ns_aneurysm.ns_parameters import (
     all_monitor,
     basic_monitor,
     bcout_dir_do_nothing,
-    bcout_poiseuille,
     beta,
     boundary_parts,
-    compare_with_poiseuille,
     dest,
     dt,
     element,
@@ -39,23 +36,14 @@ from ns_aneurysm.ns_parameters import (
     opts,
     periods,
     profile,
-    restart,
-    restart_stepsback,
-    restart_t_begin,
     rho,
-    save_bndry_marks,
-    scaling_factor,
     stab,
     t_atol,
     t_begin,
     t_end,
     t_period,
     t_rtol,
-    ts_adapt_type,
-    uniform_dt,
     uniform_dt_last_period,
-    unit_system,
-    v_avg,
     v_in,
     xdmf_all,
     xdmf_last,
@@ -93,23 +81,17 @@ ds = FE.ds(metadata={"quadrature_degree": 4})
 dS = FE.dS(metadata={"quadrature_degree": 4})
 print(W.dim())
 
-# Define normal fields
+# Define normal fields (projected normal has been removed)
 n = dict()
 for i in ["wall", "in"]:
     if normal == "FacetNormal":
         n[marks[i]] = df.FacetNormal(mesh)
-    elif normal == "proj":
-        n[marks[i]] = generate_normal.make_normal_projection(
-            mesh, boundary_parts, id=marks[i], type="CG1"
-        )
     else:
-        print("Wrong normal type.")
+        raise NotImplementedError("This code only allows to use FacetNormal.")
 
 for i in marks.get("out"):
     if normal == "FacetNormal":
         n[i] = df.FacetNormal(mesh)
-    elif normal == "proj":
-        n[i] = generate_normal.make_normal_projection(mesh, boundary_parts, id=i, type="CG1")
 
 # Define unknown and test function(s)
 w = df.Function(W)
@@ -118,48 +100,18 @@ wdot = df.Function(W)
 (vdot, pdot) = FE.split(wdot, test=False)
 
 I = df.Identity(mesh.geometry().dim())  # Identity tensor
-# edgelen = mesh.hmin()  # minimum cell diameter
-# edgelen = df.MinCellEdgeLength(mesh)  # minimum cell diameter
 edgelen = df.Constant(2.0) * df.Circumradius(mesh)
-
-# save boundary marks
-if save_bndry_marks:
-    if rank == 0:
-        if not os.path.exists("mesh_labels/"):
-            os.makedirs("mesh_labels/")
-    if scaling_factor != 1.0:
-        xdmf = df.XDMFFile(
-            comm,
-            "mesh_labels/boundary_parts_"
-            + meshname
-            + "_scale_"
-            + str(scaling_factor)
-            + ".xdmf",
-        )
-    else:
-        xdmf = df.XDMFFile(comm, "mesh_labels/boundary_parts_" + meshname + ".xdmf")
-    xdmf.write(boundary_parts)
-    xdmf.close()
 
 # Set viscosity model from model.py
 model_name = getattr(model, model_name_str)
-scale_CGS_to_SI = 0.1  # Poise to SI
+visc_model = model_name(mesh, v, scale=1.0, mu=mu)
 
-if unit_system == "SI":
-    if model_name_str == "Newtonian":
-        visc_model = model_name(mesh, v, scale=1.0, mu=mu)
-    else:
-        visc_model = model_name(mesh, v, scale=scale_CGS_to_SI)
-elif model_name_str == "Newtonian":  # unit_system=='CGS'
-    visc_model = model_name(mesh, v, scale=1.0, mu=mu)
-    # the scale has to be 1 because mu has been already scaled in ns_parameters.py
-else:
-    visc_model = model_name(mesh, v, scale=1.0)
+if model_name_str != "Newtonian":
+    NotImplementedError("This code only allows to use Newtonian model.")
 
 
 def T(p, v):  # Cauchy stress tensor
     return -p * I + 2.0 * visc_model.viscosity * df.sym(df.grad(v))
-    # return -p * I + visc_model.viscosity * df.grad(v)
 
 
 def pvn(v, n):  # normal component of a vector v
@@ -177,7 +129,6 @@ def pvt(v, n):  # tangential component of a vector v
 def NitscheBC(eq, n, ds):  # Nitsche's method implemented through the derivative of a functional
     w_ = df.TestFunction(w.function_space())
     penalty = (beta * mu / edgelen) * df.inner(eq, df.derivative(eq, w, w_)) * ds
-    # penalty = (beta * mu / edgelen) * df.derivative(df.inner(eq, eq), w, w_) * ds
     if nitsche_type == "sym":
         bcpart = (
             df.inner(T(p, v) * n, df.derivative(eq, w, w_)) * ds
@@ -213,16 +164,7 @@ if Theta == -1.0:
     # Inflow velocity
     bcin = df.DirichletBC(W.sub(0), v_in, boundary_parts, marks["in"])
     # Outflow condition
-    if bcout_poiseuille:
-        bcout_x = df.DirichletBC(
-            W.sub(0).sub(0), df.Constant(0.0), boundary_parts, marks["out"][0]
-        )
-        bcout_y = df.DirichletBC(
-            W.sub(0).sub(1), df.Constant(0.0), boundary_parts, marks["out"][0]
-        )
-        bcs = [bcin, bcout_x, bcout_y, bc0]
-    else:
-        bcs = [bcin, bc0]
+    bcs = [bcin, bc0]
     bc_name = "Dirichlet_noslip"
 else:
     bcin = df.DirichletBC(W.sub(0), v_in, boundary_parts, marks["in"])
@@ -258,8 +200,6 @@ if Theta > -1.0:
             (Theta / (gamma * (1.0 - Theta))) * pvt(v, n[marks["wall"]]),
             pvt(v_, n[marks["wall"]]),
         ) * ds(marks["wall"])
-    # else:
-    #     Fbc += NitscheBC(pvt(v, n[marks["wall"]]), n[marks["wall"]], ds(marks["wall"]))
     # Nitsche - inflow
     if Theta_in > -1.0:
         if Theta_in < 1.0:
@@ -277,18 +217,14 @@ if profile != "pulsatile":
         dest,
         meshname,
         "stationary",
-        normal + "_" + element + "_" + stab,
-        bc_name,
-        visc_model.__class__.__name__,
+        element + "_" + stab + "_" + bc_name,
     )
 else:
     folder = os.path.join(
         dest,
         meshname,
         "pulsatile",
-        normal + "_" + element + "_" + stab,
-        bc_name,
-        visc_model.__class__.__name__,
+        element + "_" + stab + "_" + bc_name,
     )
 
 
@@ -372,7 +308,6 @@ def update(ts, t):
     inflow = ctx.get("inflow")
     if inflow is not None:
         inflow.update(t)
-    outflow = ctx.get("outflow")
     problem = ctx.get("problem")
     if problem.stab is not None:
         problem.stab.update(ts)
@@ -398,7 +333,6 @@ def report(ts):
     ctx = ts.getAppCtx()
     problem = ctx.get("problem")
     solver = ctx.get("solver")
-    outflow = ctx.get("outflow")
     FE = ctx.get("FE")
 
     if ts.iterating or ts.converged:
@@ -416,11 +350,9 @@ def report(ts):
         if xdmf_last and t > t_end:
             ctx["file_xdmf"]["v"].write(v, t)
             ctx["file_xdmf"]["p"].write(p, t)
-            # ctx['file_xdmf']['mu'].write(visc_model.viscosity, t)
         elif xdmf_all:
             ctx["file_xdmf"]["v"].write(v, t)
             ctx["file_xdmf"]["p"].write(p, t)
-            # ctx['file_xdmf']['mu'].write(visc_model.viscosity, t)
         ctx["file_hdf5"]["w"].write(w, "w", t)
         ctx["file_hdf5"]["w"].write(wdot, "wdot", t)
         ctx["file_hdf5"]["w"].flush()
@@ -471,6 +403,7 @@ def report(ts):
                     v_test,
                 ) * ds(j) - (df.inner(T(p, v) * n[j], v_test) * ds(j))
 
+        # add the two Nitsche terms if wall BC was set by NitscheBC
         if Theta == 1.0:
 
             F_wss += df.inner(
@@ -484,8 +417,8 @@ def report(ts):
                 * ds(marks["wall"])
             )
 
-        # if Theta_in == 1.0:
-        #     F_wss += NitscheBC(v - v_in, n[marks["in"]], ds(marks["in"]))
+        if Theta_in == 1.0:  # tiny correction if the inflow BC was set by NitscheBC
+            F_wss -= NitscheBC(v - v_in, n[marks["in"]], ds(marks["in"]))
 
         WFv = block_split(F_wss, 0)
         rhs = df.assemble(df.action(WFv, g_test))
@@ -501,10 +434,13 @@ def report(ts):
         )
         WFv = block_split(F_wss_tan, 0)
         rhs = df.assemble(df.action(WFv, g_test))
-        traction_weak_tan = df.Function(V, name="wss_weak")
-        solver_wss.solve(traction_weak_tan.vector(), rhs)
+        wss_weak = df.Function(V, name="wss_weak")
+        solver_wss.solve(wss_weak.vector(), rhs)
 
-        wss_spaces = [("DG", 0), ("CG", 1)]
+        file_xdmf["wss_weak"].write_checkpoint(wss_weak, "wss", 0)
+
+        # set spaces in which we want to compute WSS
+        wss_spaces = [("DG", 0), ("CG", 1), ("DG", 1)]
 
         for wss_family, wss_degree in wss_spaces:
 
@@ -512,20 +448,11 @@ def report(ts):
             traction_space = df.FunctionSpace(mesh, traction_element)
             traction_computer = TractionComputation(traction_space, mark_wall=marks["wall"])
 
-            wss_weak = traction_computer.project_function(traction_weak_tan)
-
             # standard evaluation
             Tn = T(p, v) * n[marks["wall"]]
             wss = traction_computer.project_wss(Tn, n[marks["wall"]])
 
-            # file_xdmf[f"wss_weak_{wss_family}_{wss_degree}"].write_checkpoint(
-            #     wss_weak, "wss", 0
-            # )
-            # file_xdmf[f"wss_standard_{wss_family}_{wss_degree}"].write_checkpoint(wss, "wss", 0)
-            wss_weak.rename("wss", "wss")
-            file_xdmf[f"wss_weak_{wss_family}_{wss_degree}"].write(wss_weak)
-            wss.rename("wss", "wss")
-            file_xdmf[f"wss_standard_{wss_family}_{wss_degree}"].write(wss)
+            file_xdmf[f"wss_standard_{wss_family}_{wss_degree}"].write_checkpoint(wss, "wss", 0)
 
 
 if all_monitor:
@@ -620,75 +547,6 @@ if rank == 0:
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-# Restart: use data as initial solution
-if restart:
-    # move files to a folder called 'before_restart'
-    if rank == 0:
-        list_dir = os.listdir(folder)
-        os.mkdir(os.path.join(folder, "before_restart"))  # make directory
-
-        shutil.move(os.path.join(folder, "w.h5"), os.path.join(folder, "before_restart/w.h5"))
-        print("Moved file w.h5")
-        list_dir.remove("w.h5")
-
-        if os.path.exists(os.path.join(folder, "v_h5.h5")):  # move file v_h5.h5
-            shutil.move(
-                os.path.join(folder, "v_h5.h5"), os.path.join(folder, "before_restart/v_h5.h5")
-            )
-            print("Moved file v_h5.h5")
-            list_dir.remove("v_h5.h5")
-
-        # move also all the files in subfolders, for example in computed_quantities_all_*
-        for directory in list_dir:
-            list_files = os.listdir(os.path.join(folder, directory))
-            os.mkdir(os.path.join(folder, "before_restart", directory))
-
-            for file_name in list_files:
-                source = os.path.join(folder, directory, file_name)
-                destination = os.path.join(folder, "before_restart", directory, file_name)
-                shutil.move(source, destination)
-                print("Moved:", file_name)
-            # remove (empty) directory
-            os.rmdir(os.path.join(folder, directory))
-    # wait until moving is done
-    df.MPI.barrier(comm)
-
-    w0 = df.Function(W)
-    w0dot = df.Function(W)
-    h5guess = folder + "/before_restart/w.h5"
-    h5file = df.HDF5File(comm, h5guess, "r")
-    ntimesteps = h5file.attributes("/w")["count"]  # number of time steps
-    times = []
-    for i in range(ntimesteps):
-        times = np.append(
-            times, h5file.attributes("/w/vector_%d" % i).to_dict().get("timestamp")
-        )
-    h5file.read(
-        w0, "/w/vector_%d" % (ntimesteps - restart_stepsback)
-    )  # to make sure we will start before the end of the last computed period
-    h5file.read(w0dot, "/wdot/vector_%d" % (ntimesteps - restart_stepsback))
-    df.assign(problem.w, w0)
-    df.assign(problem.wdot, w0dot)
-    if t_begin == 0:
-        t = times[ntimesteps - restart_stepsback]
-        if (
-            ts_adapt_type != "none"
-        ):  # if ts_adapt_type=='none', we do not want to set a different dt
-            dt = t - times[ntimesteps - restart_stepsback - 1]
-            solver.ts.setTimeStep(dt)
-        else:
-            t = restart_t_begin
-    else:
-        # the nearest computed time from t_begin
-        t = max([i for i in times if t_begin > i])
-        t_idx = times.tolist().index(t)
-        if ts_adapt_type != "none":
-            dt = times[t_idx] - times[t_idx - 1]  # the nearest dt
-            solver.ts.setTimeStep(dt)
-    solver.ts.setTime(t)
-    h5file.close()
-    solver.problem.set_solution()
-
 if xdmf_all:
     resNS_file_xdmf = os.path.join(folder, "results_xdmf", "%s.xdmf")
 if xdmf_last:
@@ -700,17 +558,14 @@ if xdmf_last or xdmf_all:
 file_hdf5 = dict()
 
 if xdmf_last or xdmf_all:
-    # for i in ["v", "p"]:  # "mu"
     for i in [
         "v",
         "p",
-        "wss_weak_DG_0",
+        "wss_weak",
         "wss_standard_DG_0",
-        "wss_weak_DG_1",
         "wss_standard_DG_1",
-        "wss_weak_CG_1",
         "wss_standard_CG_1",
-    ]:  # "mu"
+    ]:
         file_xdmf[i] = df.XDMFFile(comm, resNS_file_xdmf % i)
         file_xdmf[i].parameters["flush_output"] = True
         file_xdmf[i].parameters["rewrite_function_mesh"] = False
@@ -726,42 +581,6 @@ opts.view()
 report(solver.ts)
 solver.solve()
 
-if not uniform_dt_last_period:
-    solver.ts.view()
-else:
-    opts["ts_adapt_type"] = "none"
-    solver.ts.setMaxTime(t_end)
-    solver.ts.setTimeStep(uniform_dt)
-    solver.ts.setFromOptions()
-    solver.ts.setUp()
-    print(
-        "ts adapt type has been changed to none (i.e. uniform length of time steps). New options are the following:"
-    )
-    opts.view()
-
-    resNS_file_hdf5 = os.path.join(folder, "last_period", "%s.h5")
-    if xdmf_last or xdmf_all:
-        resNS_file_xdmf = os.path.join(folder, "last_period", "results_xdmf", "%s.xdmf")
-
-    if xdmf_last or xdmf_all:
-        file_xdmf = dict()
-    file_hdf5 = dict()
-
-    if xdmf_last or xdmf_all:
-        for i in ["v", "p"]:  # "mu"
-            file_xdmf[i] = df.XDMFFile(comm, resNS_file_xdmf % i)
-            file_xdmf[i].parameters["flush_output"] = True
-            file_xdmf[i].parameters["rewrite_function_mesh"] = False
-    file_hdf5["w"] = df.HDF5File(comm, resNS_file_hdf5 % "w", "w")
-
-    ctx.update({f: eval(f) for f in ["file_hdf5"]})
-    if xdmf_last or xdmf_all:
-        ctx.update({f: eval(f) for f in ["file_xdmf"]})
-
-    report(solver.ts)
-    solver.solve()
-    solver.ts.view()
-
 if xdmf_last:
     resNS_file_last = os.path.join(folder, "last_timestep/%s.h5")
     w_last = df.HDF5File(comm, resNS_file_last % "w", "w")
@@ -771,38 +590,8 @@ if xdmf_last:
     v, p = w.split(deepcopy=True)
     v.rename("v", "velocity")
     p.rename("p", "pressure")
-    # file_xdmf["v"].write(v, t)
-    # file_xdmf["p"].write(p, t)
     file_xdmf["v"].write_checkpoint(v, "v", append=False)
     file_xdmf["p"].write_checkpoint(p, "p", append=False)
-    # file_xdmf["mu"].write(visc_model.viscosity, t)
-
-if compare_with_poiseuille:
-    u_profile = "2.0*v_avg*(pow(r,2)-(pow(x[0],2)+pow(x[1],2)))/(r*r)"
-    u_exact = df.Expression(("0.0", "0.0", u_profile), r=0.001, v_avg=v_avg, degree=2)
-    V = W.sub(0).collapse()
-    u_ex_proj = df.Function(V)
-    u_ex_proj = df.project(u_exact, V)
-
-    file_xdmf["v_exact"] = df.XDMFFile(comm, os.path.join(folder, "last_timestep/v_exact.xdmf"))
-    file_xdmf["v_exact"].parameters["rewrite_function_mesh"] = False
-    u_ex_proj.rename("v", "velocity")
-    t = solver.ts.getTime()
-    file_xdmf["v_exact"].write(u_ex_proj, t)
-
-    v_max = 2 * v_avg
-    delta_p = 4 * mu * v_max * 0.002 / 0.001**2
-    p_exact = df.Expression("P*(1-x[2]/L)", P=delta_p, L=0.002, degree=2)
-
-    error_velocity = np.sqrt(df.assemble(df.dot(v - u_exact, v - u_exact) * dx))
-    error_pressure = np.sqrt(df.assemble(df.dot(p - p_exact, p - p_exact) * dx))
-    print(f"L2 error velocity = {error_velocity}")
-    print(f"L2 error pressure = {error_pressure}")
-    with open(os.path.join(folder, "last_timestep/L2_error.txt"), "w") as f:
-        f.write("L2 norm of the velocity difference wrt analytical solution\n")
-        f.write(str(error_velocity))
-        f.write("\n")
-        f.write(str(error_pressure))
 
 
 file_hdf5["w"].close()
