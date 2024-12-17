@@ -8,12 +8,11 @@ import petsc4py
 petsc4py.init(sys.argv)
 
 import dolfin as df
-import numpy as np
 from ufl import block_split
 
 import ns_aneurysm.petsc_ts_solver as TS
 import ns_aneurysm.solver_settings as solver_settings
-from ns_aneurysm import finite_elements, generate_normal, model, stabilizations
+from ns_aneurysm import finite_elements, model, stabilizations
 from ns_aneurysm.ns_parameters import (
     Theta,
     Theta_in,
@@ -420,11 +419,6 @@ def report(ts):
         if Theta_in == 1.0:  # tiny correction if the inflow BC was set by NitscheBC
             F_wss -= NitscheBC(v - v_in, n[marks["in"]], ds(marks["in"]))
 
-        WFv = block_split(F_wss, 0)
-        rhs = df.assemble(df.action(WFv, g_test))
-        traction_weak = df.Function(V, name="traction_force")
-        solver_wss.solve(traction_weak.vector(), rhs)
-
         F_wss_tan = F_wss - (
             df.inner(
                 df.inner(T(p, v) * n[marks["wall"]], n[marks["wall"]]) * n[marks["wall"]],
@@ -432,6 +426,7 @@ def report(ts):
             )
             * ds(marks["wall"])
         )
+
         WFv = block_split(F_wss_tan, 0)
         rhs = df.assemble(df.action(WFv, g_test))
         wss_weak = df.Function(V, name="wss_weak")
