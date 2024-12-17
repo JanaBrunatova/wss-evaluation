@@ -3,6 +3,8 @@
 This repository contain codes and necessary files to reproduce data published in the paper
 **_On the numerical evaluation of wall shear stress using the finite element method_**
 
+Computational meshes for 3D problems can be found at [![DOI:10.5281/zenodo.14503385](https://zenodo.org/badge/DOI/10.5281/zenodo.14503385.svg)](https://doi.org/10.5281/zenodo.14503385)
+
 ## Prerequisities
 
 The code is written in Python3 and requires the following:
@@ -55,25 +57,26 @@ python3 aneurysm_example.py -model Newtonian -mu 0.004 -rho 1000 -theta -1.0 -un
 
 - For the P1/P1 stabilized element, run:
 ```bash
-python aneurysm_example.py -model Newtonian -mu 0.004 -rho 1000 -theta 1.0 -theta_in 1.0 -beta 100 -unit_system SI -meshname ${meshname} -meshfolder ${meshfolder} -element p1p1 -normal FacetNormal -stab ip -basic_monitor -refsys_filename meshes/${case}_refsystems_SI.dat -profile stac -profile_analytical True -v-avg 0.5 -bcout_dir_do_nothing False -unit_system SI -xdmf_last True -dest ${destination}
+python3 aneurysm_example.py -model Newtonian -mu 0.004 -rho 1000 -theta 1.0 -theta_in 1.0 -beta 100 -unit_system SI -meshname ${meshname} -meshfolder ${meshfolder} -element p1p1 -normal FacetNormal -stab ip -basic_monitor -refsys_filename meshes/${case}_refsystems_SI.dat -profile stac -profile_analytical True -v-avg 0.5 -bcout_dir_do_nothing False -unit_system SI -xdmf_last True -dest ${destination}
 ```
 
-It will store a HDF5File `w.h5`, where both the velocity and pressure fields are stored. Moreover, since we used the option `-xdmf_last True`, the velocity and pressure will also be stored in an XDMF file format.
+It will save a HDF5File `w.h5`, where both the velocity and pressure fields are stored. 
+Moreover, since we used the option `-xdmf_last True`, the velocity and pressure will also be stored in an XDMF file format and WSS will be evaluated by the boundary-flux evaluation as well as P1, DG1 and DG0 projection. Everything is stored using the function `write_checkpoint` in FEniCS.
 
-Finally, run the following postprocessing to obtain WSS from the velocity and pressure field:
+Finally, run the following postprocessing script to obtain the maximum, minimum, average WSS and LSA indicators:
 
 - For the P2/P1 element:
 ```bash
-python3 compute_wss_aneurysm.py --element ${element} --mesh ${meshpath} --case ${case} -o ${output_folder} --w-file ${path_to_w_file} --compute-differences --stationary
+python3 evaluate_indicators.py --case ${case} --mesh-folder ${meshfolder} --res-folder ${res_folder} --element th --stab none --edgelengths 300,200,100
 ```
 
 - For the P1/P1 stabilized element:
 ```bash
-python compute_wss_aneurysm.py --element ${element} --stab ip --mesh ${meshpath} --case ${case} -o ${output_folder} --w-file ${path_to_w_file} --compute-differences --stationary --nitsche-noslip --beta 100
+python3 evaluate_indicators.py --case ${case} --mesh-folder ${meshfolder} --res-folder ${res_folder} --element p1p1 --stab ip --edgelengths 300,200,100
 ```
 
 **Parameters to set:**
 
-- `meshpath`: Name of the mesh file containing the folder as well.
-- `output_folder`: Name of the output folder where wall shear stresses will be stored.
-- `path_to_w_file`: Path to the `w.h5` file from which the wall shear stresses will be computed. For example, `results/${destination}/${meshname}/stationary/FacetNormal_th_none/Dirichlet_noslip/Newtonian/w.h5`
+- `meshfolder`: Name of the marked mesh file `*_marked.h5` containing the folder as well.
+- `res_folder`: Name of the results folder where wall shear stresses are be stored. For example, `results/${destination}/${meshname}/stationary/th_none_Dirichlet_noslip/Newtonian/last_timestep/`
+- `edgelengths`: Either one edge lenght or a comma-separated list of edge lengths in micrometers.
