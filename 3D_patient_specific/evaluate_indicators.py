@@ -26,7 +26,7 @@ parser.add_argument(
     default="",
     type=str,
     dest="mesh_folder",
-    help="path to the corresponding meshes marked by facet markers",
+    help="path to the corresponding mesh marked by facet markers (.h5)",
 )
 parser.add_argument(
     "--res-folder",
@@ -53,7 +53,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--edgelengths",
-    default="300,250,200,150,125,100,75",
+    default="300,250,200,150,100",
     type=parse_edgelengths,  # Use the custom parser function
     dest="edgelengths",
     help="A comma-separated list of edgelengths in micrometers, e.g., 300,250,200,150,100",
@@ -81,13 +81,8 @@ for edgelength in edgelengths:
     mesh_folder = args.mesh_folder
     res_folder = args.res_folder
 
-    if element == "p1p1":
-        mesh_name = f"{mesh_folder}/{case}_layer_uniform_{edgelength}um_marked.h5"
-    else:
-        mesh_name = f"{mesh_folder}/{case}_uniform_{edgelength}um_marked.h5"
-
     mesh = df.Mesh()
-    with df.HDF5File(df.MPI.comm_world, mesh_name, "r") as hdf:
+    with df.HDF5File(df.MPI.comm_world, mesh_folder, "r") as hdf:
         hdf.read(mesh, "/mesh", False)
         dim = mesh.geometry().dim()
         boundary_parts = df.MeshFunction("size_t", mesh, dim - 1, 0)
